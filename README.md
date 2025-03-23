@@ -1,1 +1,1 @@
-git clone https://github.com/test2641/test_splendor.git
+git clone https://github.com/kouki1424/Splendor.git
