@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Splendor AI Demo</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 20px;
+    }
+    .board {
+      display: flex;
+      gap: 40px;
+    }
+    .player-info, .token-pool, .cards {
+      border: 1px solid #aaa;
+      padding: 10px;
+    }
+    .player-info h2, .token-pool h2, .cards h2 {
+      margin: 0 0 10px 0;
+    }
+    .token-box {
+      display: flex;
+      gap: 10px;
+    }
+    .token {
+      width: 30px; height: 30px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: bold;
+    }
+    .red { background: red; }
+    .blue { background: blue; }
+    .green { background: green; }
+    .black { background: black; }
+    .white { background: gray; }
+  </style>
+</head>
+<body>
+  <h1>Splendor AI Demo</h1>
+
+  {% if state.done %}
+    <h2>ゲーム終了！</h2>
+  {% else %}
+    <h2>現在の手番: プレイヤー {{ current_player }}  
+        (評価値: {{ eval_value }})</h2>
+  {% endif %}
+
+  <div>
+    <a href="{{ url_for('best_move') }}">MCTSで最善手を選ぶ</a> |
+    <a href="{{ url_for('reset_game') }}">リセット</a>
+  </div>
+  <hr>
+
+  <div class="board">
+    <!-- プレイヤー情報一覧 -->
+    <div class="player-area">
+      {% for p_id, player in enumerate(state.players) %}
+        <div class="player-info">
+          <h2>プレイヤー {{ p_id }}</h2>
+          <p>ポイント: {{ player.points }}</p>
+          <p>ボーナス:
+            {% for color, bnum in player.bonus.items() %}
+              {{ color }}:{{ bnum }} 
+            {% endfor %}
+          </p>
+          <p>トークン:</p>
+          <div class="token-box">
+            {% for color, tnum in player.tokens.items() %}
+              <div class="token {{color}}">{{ tnum }}</div>
+            {% endfor %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+
+    <!-- トークンプール -->
+    <div class="token-pool">
+      <h2>トークンプール</h2>
+      <div class="token-box">
+      {% for color, tnum in state.token_pool.items() %}
+        <div class="token {{color}}">{{ tnum }}</div>
+      {% endfor %}
+      </div>
+    </div>
+
+    <!-- 場のカード -->
+    <div class="cards">
+      <h2>カード</h2>
+      <ol>
+      {% for c in state.cards %}
+        <li>
+          Pts: {{ c.points }},
+          Bonus: {{ c.bonus }},
+          Cost: 
+          {% for color, cost in c.cost.items() %}
+            {{color}}:{{cost}}
+          {% endfor %}
+        </li>
+      {% endfor %}
+      </ol>
+    </div>
+  </div>
+
+  {% if state.done %}
+    <hr>
+    <h2>結果</h2>
+    {% set winners = [] %}
+    {% for i, p in enumerate(state.players) %}
+      {% if p.points >= state.winning_points %}
+        {% set _ = winners.append(i) %}
+      {% endif %}
+    {% endfor %}
+    {% if winners|length == 0 %}
+      <p>勝者なし</p>
+    {% elif winners|length == 1 %}
+      <p>勝者: プレイヤー {{ winners[0] }}</p>
+    {% else %}
+      <p>複数勝者: {{ winners }}</p>
+    {% endif %}
+  {% endif %}
+
+</body>
+</html>
