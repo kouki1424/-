@@ -1,0 +1,224 @@
+import math
+import random
+from collections import defaultdict
+from itertools import combinations, chain
+
+class Card:
+    def __init__(self, points, cost, bonus):
+        self.points = points
+        self.cost = cost  # {'red': 2, 'blue': 1, ...}
+        self.bonus = bonus  # 例: 'red'
+
+class PlayerState:
+    def __init__(self):
+        self.points = 0
+        self.tokens = defaultdict(int)
+        self.bonus = defaultdict(int)
+
+    def copy(self):
+        new_p = PlayerState()
+        new_p.points = self.points
+        new_p.tokens = defaultdict(int, self.tokens.copy())
+        new_p.bonus = defaultdict(int, self.bonus.copy())
+        return new_p
+
+class SplendorState:
+    def __init__(self, num_players=2):
+        self.num_players = num_players
+        self.players = [PlayerState() for _ in range(num_players)]
+        self.current_player = 0
+        self.token_pool = defaultdict(int)
+        self.cards = []
+        self.done = False
+        self.winning_points = 15
+
+    def copy(self):
+        new_state = SplendorState(self.num_players)
+        new_state.players = [p.copy() for p in self.players]
+        new_state.current_player = self.current_player
+        new_state.token_pool = defaultdict(int, self.token_pool.copy())
+        new_state.cards = list(self.cards)
+        new_state.done = self.done
+        new_state.winning_points = self.winning_points
+        return new_state
+
+    def next_player(self):
+        self.current_player = (self.current_player + 1) % self.num_players
+
+    def check_game_end(self):
+        for p in self.players:
+            if p.points >= self.winning_points:
+                self.done = True
+                return
+
+class Action:
+    def __init__(self, action_type, detail=None):
+        self.action_type = action_type
+        self.detail = detail  # {"colors": [...]} or {"card_idx": X}
+
+    def __hash__(self):
+        return hash((self.action_type, str(self.detail)))
+
+    def __eq__(self, other):
+        return (self.action_type, self.detail) == (other.action_type, other.detail)
+
+def setup_game(num_players=2):
+    state = SplendorState(num_players=num_players)
+    # トークンプール初期化
+    for color in ["red", "blue", "green", "black", "white"]:
+        state.token_pool[color] = 7
+
+    # カードの簡易セット
+    state.cards = [
+        Card(1, {"red": 1}, "red"),
+        Card(1, {"blue": 2}, "blue"),
+        Card(2, {"red": 2, "blue": 1}, "green"),
+        Card(2, {"green": 2, "black": 1}, "red"),
+        Card(3, {"red": 3, "blue": 2}, "black"),
+        Card(3, {"black": 3, "white": 2}, "white"),
+        Card(4, {"blue": 3, "green": 3}, "blue"),
+        Card(4, {"red": 3, "black": 3}, "white"),
+    ]
+    return state
+
+def get_legal_actions(state):
+    actions = []
+    # トークン取得（在庫ある色を1～3色）
+    available_colors = [c for c in state.token_pool if state.token_pool[c] > 0]
+    for r in range(1, 4):
+        for combo in combinations(available_colors, r):
+            actions.append(Action("take_tokens", {"colors": combo}))
+    # カード購入
+    current_player = state.players[state.current_player]
+    for idx, card in enumerate(state.cards):
+        if can_buy_card(current_player, card):
+            actions.append(Action("buy_card", {"card_idx": idx}))
+    if not actions:
+        actions.append(Action("pass"))
+    return actions
+
+def can_buy_card(player_state, card):
+    for color, cost_num in card.cost.items():
+        required_after_bonus = max(cost_num - player_state.bonus[color], 0)
+        if player_state.tokens[color] < required_after_bonus:
+            return False
+    return True
+
+def apply_action(state, action):
+    new_state = state.copy()
+    player = new_state.players[new_state.current_player]
+    if action.action_type == "take_tokens":
+        for c in action.detail["colors"]:
+            new_state.token_pool[c] -= 1
+            player.tokens[c] += 1
+    elif action.action_type == "buy_card":
+        card_idx = action.detail["card_idx"]
+        card = new_state.cards[card_idx]
+        for color, cost_num in card.cost.items():
+            req = max(cost_num - player.bonus[color], 0)
+            player.tokens[color] -= req
+        player.points += card.points
+        if card.bonus:
+            player.bonus[card.bonus] += 1
+        new_state.cards.pop(card_idx)
+    elif action.action_type == "pass":
+        pass
+
+    new_state.check_game_end()
+    if not new_state.done:
+        new_state.next_player()
+    return new_state
+
+############################
+# 評価関数（例）
+############################
+def evaluate_state(state, player_id):
+    """
+    指定プレイヤーに対する評価値（相対スコア）。
+    """
+    weight_points = 10
+    weight_tokens = 1
+    weight_bonus = 5
+
+    def player_score(p):
+        return (p.points * weight_points
+                + sum(p.tokens.values()) * weight_tokens
+                + sum(p.bonus.values()) * weight_bonus)
+
+    my_score = player_score(state.players[player_id])
+    other_score = 0
+    for i, p in enumerate(state.players):
+        if i != player_id:
+            other_score += player_score(p)
+    return my_score - other_score
+
+############################
+# 簡易MCTS
+############################
+class Node:
+    def __init__(self, state, parent=None):
+        self.state = state
+        self.parent = parent
+        self.children = {}
+        self.visit_count = 0
+        self.value_sum = 0.0
+
+def mcts_search(root_state, simulations=200):
+    root_node = Node(root_state)
+    for _ in range(simulations):
+        node = tree_policy(root_node)
+        reward = default_policy(node.state)
+        backup(node, reward)
+    # 最多訪問ノードのアクションを返す
+    best_action, _ = max(root_node.children.items(), key=lambda x: x[1].visit_count)
+    return best_action
+
+def tree_policy(node):
+    while not node.state.done:
+        actions = get_legal_actions(node.state)
+        if len(actions) > len(node.children):
+            return expand(node, actions)
+        else:
+            node = best_child(node)
+    return node
+
+def expand(node, actions):
+    used_actions = set(node.children.keys())
+    for action in actions:
+        if action not in used_actions:
+            new_state = apply_action(node.state, action)
+            child_node = Node(new_state, parent=node)
+            node.children[action] = child_node
+            return child_node
+    return node
+
+def best_child(node, c_param=1.4):
+    best_score = -float('inf')
+    best_ch = None
+    for action, child in node.children.items():
+        if child.visit_count == 0:
+            return child
+        q = child.value_sum / child.visit_count
+        u = c_param * math.sqrt(math.log(node.visit_count) / child.visit_count)
+        score = q + u
+        if score > best_score:
+            best_score = score
+            best_ch = child
+    return best_ch
+
+def default_policy(state):
+    # ランダムに最後までプレイして、current_playerが勝てば1.0
+    s_copy = state.copy()
+    cp_id = s_copy.current_player
+    while not s_copy.done:
+        actions = get_legal_actions(s_copy)
+        a = random.choice(actions)
+        s_copy = apply_action(s_copy, a)
+    winners = [i for i, p in enumerate(s_copy.players) if p.points >= s_copy.winning_points]
+    return 1.0 if cp_id in winners else 0.0
+
+def backup(node, reward):
+    while node is not None:
+        node.visit_count += 1
+        node.value_sum += reward
+        node = node.parent
